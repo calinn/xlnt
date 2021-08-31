@@ -89,6 +89,8 @@ struct Cell
     Cell_Reference ref{0, 0}; // 'r'
     std::string value; // <v> OR <is>
     std::string formula_string; // <f>
+    std::string formula_shared_ref;
+    size_t formula_shared_si;
 };
 
 } // namespace detail

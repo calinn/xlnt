@@ -46,6 +46,8 @@
 #include <detail/serialization/xlsx_consumer.hpp>
 #include <detail/serialization/zstream.hpp>
 
+#include <third-party/xlfparser/xlfparser.h>
+
 namespace {
 /// string_equal
 /// for comparison between std::string and string literals
@@ -222,6 +224,22 @@ xlnt::detail::Cell parse_cell(xlnt::row_t row_arg, xml::parser *parser)
                 // <f> formula
                 else if (string_equal(parser->name(), "f"))
                 {
+                    std::string formula_shared;
+                    for (auto &attr : parser->attribute_map())
+                    {
+                        if (string_equal(parser->attribute("t"), "shared"))
+                        {                                                
+                            if (string_equal(attr.first.name(), "ref"))
+                            {
+                                c.formula_shared_ref = attr.second.value;
+                                formula_shared = parser->value();
+                            }
+                            else if (string_equal(attr.first.name(), "si"))
+                            {
+                                c.formula_shared_si = static_cast<int>(strtol(attr.second.value.c_str(), nullptr, 10));
+                            }
+                        }
+                    }
                     c.formula_string += std::move(parser->value());
                 }
             }
@@ -743,6 +761,156 @@ void xlsx_consumer::read_worksheet_sheetdata()
         return;
     }
     Sheet_Data ws_data = parse_sheet_data(parser_, converter_);
+
+    // set shared formula for all reference cell group with same shared formula index
+    for (size_t i = 0; i < ws_data.parsed_cells.size(); ++i)
+    {
+        const Cell &cell = ws_data.parsed_cells[i];
+        if (!cell.formula_shared_ref.empty())
+        {   
+            // ref cell
+            size_t pos = cell.formula_shared_ref.find(":");
+            std::string cell1 = cell.formula_shared_ref.substr(0,pos);
+            std::string cell2 = cell.formula_shared_ref.substr(pos+1,cell.formula_shared_ref.length());
+            auto ref1 = cell_reference(cell1);
+            auto ref2 = cell_reference(cell2);
+
+            // formula string
+            std::string formula = '='+cell.formula_string;
+            std::vector<xlfparser::Token> tokens = xlfparser::tokenize(formula);
+            
+            std::vector<std::pair<size_t, std::string>> vcells; // cells in shared formula reference
+
+            size_t a = 0, b = 0;
+            size_t n = 1;
+            size_t index = 0;
+            bool isConstantRow = ref1.row() == ref2.row();
+            bool isConstantCol = ref1.column_index() == ref2.column_index();
+            xlnt::row_t row1 = ref1.row();
+            xlnt::column_t::index_t col1 = ref1.column_index();
+            
+            // constant row
+            short int sign = 1;
+            if (isConstantRow) {                
+                b = ref2.column_index();
+                sign = (b > col1) ? 1: -1;
+                a = col1 + n * sign;
+            }
+            // constant column
+            else if (isConstantCol) {                
+                b = ref2.row();
+                sign = (b > row1) ? 1: -1;
+                a = row1 + n * sign;                
+            }
+
+            unsigned k = i;
+            while (a <= b)
+            {
+                // parsed_cells index
+                if (isConstantRow)
+                {
+                    do
+                    {
+                        k += sign;
+                    }
+                    while (!(ws_data.parsed_cells[k].ref.row == row1 && ws_data.parsed_cells[k].ref.column == a) && ws_data.parsed_cells[k].ref.column <= b);
+                } else if (isConstantCol)
+                {
+                    do
+                    {
+                        k += sign;
+                    }
+                    while (!(ws_data.parsed_cells[k].ref.row == a && ws_data.parsed_cells[k].ref.column == col1) && ws_data.parsed_cells[k].ref.row <= b);
+                }
+                index = k;
+
+                // formula
+                std::string formula_string;
+                for (const auto& token: tokens)
+                {                        
+                    switch (token.type())
+                    {
+                        case xlfparser::Token::Type::Operand: {
+                            switch(token.subtype())
+                            {
+                                case xlfparser::Token::Subtype::Range: {
+                                    std::string operand = token.value(formula);
+                                    //size_t pos1 = operand.find("!");                                    
+                                    //if (pos1 != std::string::npos) {
+                                    //    formula_string += operand.substr(0,pos1);
+                                    //    operand = operand.substr(pos1+1,operand.length());
+                                    //}
+
+                                    // check for range of cell with :
+                                    std::vector<std::string> vOperands;
+                                    size_t pos2 = operand.find(":");
+                                    if (pos2 != std::string::npos)
+                                    {
+                                        std::string s1 = operand.substr(0,pos2);
+                                        std::string s2 = operand.substr(pos2+1,operand.length());
+                                        vOperands.push_back(s1);
+                                        vOperands.push_back(s2);
+                                    }
+                                    else
+                                    {
+                                        vOperands.push_back(operand);
+                                    }
+                                    
+                                    // save new offset cell for all cell operand range found
+                                    for (unsigned j = 0; j < vOperands.size(); ++j)
+                                    {
+                                        if (j==1)
+                                            formula_string += ':';
+                                        std::string operand_string = vOperands[j];
+                                        auto ref = xlnt::cell_reference(operand_string);
+                                        if (isConstantRow && !ref.column_absolute())
+                                        {
+                                            operand_string = ref.make_offset(n,0).to_string();
+                                        } else if (isConstantCol && !ref.row_absolute())
+                                        {
+                                            operand_string = ref.make_offset(0,n).to_string();
+                                        }
+                                        formula_string += operand_string;                                        
+                                    }
+                                    break;                                    
+                                }
+                                default:
+                                    formula_string += token.value(formula);
+                            }
+                            break;
+                        }
+                        case xlfparser::Token::Type::Function: {
+                            
+                            switch(token.subtype())
+                            {
+                                case xlfparser::Token::Subtype::Start: {
+                                    formula_string += token.value(formula) + '(';
+                                    break;
+                                }
+                                default:
+                                    formula_string += token.value(formula);
+                            }
+                            break;                            
+                        }
+                        default:
+                            formula_string += token.value(formula);
+                    }
+                }
+                vcells.push_back({index, formula_string});
+                n += sign;
+                a += sign;
+            }
+
+            // Assign shared formula
+            for (const auto &cell_formula : vcells)
+            {
+                unsigned long idx = cell_formula.first;
+                std::string formula_string = cell_formula.second;
+                ws_data.parsed_cells[idx].formula_string = formula_string;
+            }
+        }
+    }
+
     // NOTE: parse->construct are seperated here and could easily be threaded
     // with a SPSC queue for what is likely to be an easy performance win
     for (auto &row : ws_data.parsed_rows)
