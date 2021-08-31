@@ -766,10 +766,10 @@ void xlsx_consumer::read_worksheet_sheetdata()
     for (size_t i = 0; i < ws_data.parsed_cells.size(); ++i)
     {
         const Cell &cell = ws_data.parsed_cells[i];
-        if (!cell.formula_shared_ref.empty())
+        size_t pos;
+        if (!cell.formula_shared_ref.empty() && (pos = cell.formula_shared_ref.find(":")) && pos != std::string::npos)
         {   
             // ref cell
-            size_t pos = cell.formula_shared_ref.find(":");
             std::string cell1 = cell.formula_shared_ref.substr(0,pos);
             std::string cell2 = cell.formula_shared_ref.substr(pos+1,cell.formula_shared_ref.length());
             auto ref1 = cell_reference(cell1);
@@ -782,7 +782,7 @@ void xlsx_consumer::read_worksheet_sheetdata()
             std::vector<std::pair<size_t, std::string>> vcells; // cells in shared formula reference
 
             size_t a = 0, b = 0;
-            size_t n = 1;
+            int n = 1;
             size_t index = 0;
             bool isConstantRow = ref1.row() == ref2.row();
             bool isConstantCol = ref1.column_index() == ref2.column_index();
