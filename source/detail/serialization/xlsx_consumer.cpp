@@ -224,15 +224,22 @@ xlnt::detail::Cell parse_cell(xlnt::row_t row_arg, xml::parser *parser)
                 // <f> formula
                 else if (string_equal(parser->name(), "f"))
                 {
-                    std::string formula_shared;
-                    for (auto &attr : parser->attribute_map())
-                    {
-                        if (string_equal(parser->attribute("t"), "shared"))
-                        {                                                
+                    auto attrs = parser->attribute_map();
+                    bool isThereAttributeT{false};
+                    for (auto &attr : attrs) {
+                        if (string_equal(attr.first.name(), "t") && string_equal(parser->attribute("t"), "shared"))
+                        {
+                            isThereAttributeT = true;
+                            break;
+                        }
+                    }
+                    
+                    if (isThereAttributeT) {
+                        for (auto &attr : attrs)
+                        {                                           
                             if (string_equal(attr.first.name(), "ref"))
                             {
                                 c.formula_shared_ref = attr.second.value;
-                                formula_shared = parser->value();
                             }
                             else if (string_equal(attr.first.name(), "si"))
                             {
@@ -858,19 +865,24 @@ void xlsx_consumer::read_worksheet_sheetdata()
                                     
                                     // save new offset cell for all cell operand range found
                                     for (unsigned j = 0; j < vOperands.size(); ++j)
-                                    {
+                                    {                                        
                                         if (j==1)
                                             formula_string += ':';
                                         std::string operand_string = vOperands[j];
-                                        auto ref = xlnt::cell_reference(operand_string);
-                                        if (isConstantRow && !ref.column_absolute())
-                                        {
-                                            operand_string = ref.make_offset(n,0).to_string();
-                                        } else if (isConstantCol && !ref.row_absolute())
-                                        {
-                                            operand_string = ref.make_offset(0,n).to_string();
+                                        try {
+                                            auto ref = xlnt::cell_reference(operand_string);
+                                            if (isConstantRow && !ref.column_absolute())
+                                            {
+                                                operand_string = ref.make_offset(n,0).to_string();
+                                            } else if (isConstantCol && !ref.row_absolute())
+                                            {
+                                                operand_string = ref.make_offset(0,n).to_string();
+                                            }
                                         }
-                                        formula_string += operand_string;                                        
+                                        catch (...) {
+                                            //throw invalid_cell_reference(operand_string);
+                                        }
+                                        formula_string += operand_string;
                                     }
                                     break;                                    
                                 }
