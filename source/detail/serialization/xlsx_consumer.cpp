@@ -770,7 +770,8 @@ void xlsx_consumer::read_worksheet_sheetdata()
     Sheet_Data ws_data = parse_sheet_data(parser_, converter_);
 
     // set shared formula for all reference cell group with same shared formula index
-    for (size_t i = 0; i < ws_data.parsed_cells.size(); ++i)
+    size_t iMax = ws_data.parsed_cells.size();
+    for (size_t i = 0; i < iMax; ++i)
     {
         const Cell &cell = ws_data.parsed_cells[i];
         size_t pos;
@@ -820,14 +821,14 @@ void xlsx_consumer::read_worksheet_sheetdata()
                     {
                         k += sign;
                     }
-                    while (!(ws_data.parsed_cells[k].ref.row == row1 && ws_data.parsed_cells[k].ref.column == a) && ws_data.parsed_cells[k].ref.column <= b);
+                    while (k < iMax-1 && !(ws_data.parsed_cells[k].ref.row == row1 && ws_data.parsed_cells[k].ref.column == a) && ws_data.parsed_cells[k].ref.column <= b);
                 } else if (isConstantCol)
                 {
                     do
                     {
                         k += sign;
                     }
-                    while (!(ws_data.parsed_cells[k].ref.row == a && ws_data.parsed_cells[k].ref.column == col1) && ws_data.parsed_cells[k].ref.row <= b);
+                    while (k < iMax-1 && !(ws_data.parsed_cells[k].ref.row == a && ws_data.parsed_cells[k].ref.column == col1) && ws_data.parsed_cells[k].ref.row <= b);
                 }
                 index = k;
 
